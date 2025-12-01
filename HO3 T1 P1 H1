@@ -1,0 +1,218 @@
+import java.io.*;
+import java.util.*;
+
+class Arc {
+    int target;
+    int weight;
+    public Arc(int target, int weight) {
+        this.target = target;
+        this.weight = weight;
+    }
+}
+
+public class CollecteOptimisee {
+
+    private Map<Integer, List<Arc>> adj = new HashMap<>();
+    private int[][] distMatrix;
+    private int[][] nextNode;
+    private int numNodes = 0;
+
+    // Valeur "Infinie" pour éviter les dépassements d'entiers
+    private final int INF = 999999;
+
+    public static void main(String[] args) {
+        new CollecteOptimisee().run();
+    }
+
+    public void run() {
+        // 1. Chargement du graphe (HO3 - Mixte)
+        String cheminFichier = "/Users/corentinlepeltier/IdeaProjects/eval4/src/graphe.txt";
+
+        if (!loadGraph(cheminFichier)) {
+            System.out.println("Erreur : Impossible de lire le fichier.");
+            return;
+        }
+
+        // 2. Calcul des trajets possibles (Floyd-Warshall)
+        computeFloydWarshall();
+
+        Scanner scanner = new Scanner(System.in);
+        System.out.println("--- COLLECTE OPTIMISÉE (CHOIX DU SENS) ---");
+
+        int u = -1, v = -1;
+        int poidsArc = -1;
+        boolean sensDirectPossible = false;
+        boolean sensInversePossible = false;
+
+        // --- 3. BOUCLE DE SAISIE ET VÉRIFICATION ---
+        while (true) {
+            try {
+                System.out.println("\nEntrez les deux sommets de la rue où se trouve la poubelle :");
+                System.out.print("  Sommet A : ");
+                u = scanner.nextInt();
+                System.out.print("  Sommet B : ");
+                v = scanner.nextInt();
+
+                // On regarde si l'arc existe dans un sens ou l'autre
+                int poidsDirect = getArcWeight(u, v);
+                int poidsInverse = getArcWeight(v, u);
+
+                sensDirectPossible = (poidsDirect != -1);
+                sensInversePossible = (poidsInverse != -1);
+
+                if (sensDirectPossible || sensInversePossible) {
+                    // Si l'arc existe dans les deux sens, on prend le poids d'un des deux (supposé identique)
+                    poidsArc = sensDirectPossible ? poidsDirect : poidsInverse;
+                    System.out.println("  > Rue identifiée (" + poidsArc + "m). Calcul du meilleur sens de passage...");
+                    break;
+                } else {
+                    System.err.println("  > ERREUR : Aucune route directe entre " + u + " et " + v + " (dans aucun sens).");
+                }
+            } catch (Exception e) {
+                System.out.println("  > Erreur de saisie.");
+                scanner.next();
+            }
+        }
+
+        // --- 4. COMPARAISON DES DEUX SCÉNARIOS ---
+
+        // Scénario 1 : Sens U -> V (0 -> u -> v -> 0)
+        int coutTotalDirect = INF;
+        if (sensDirectPossible) {
+            if (distMatrix[0][u] != INF && distMatrix[v][0] != INF) {
+                coutTotalDirect = distMatrix[0][u] + poidsArc + distMatrix[v][0];
+            }
+        }
+
+        // Scénario 2 : Sens V -> U (0 -> v -> u -> 0)
+        int coutTotalInverse = INF;
+        if (sensInversePossible) {
+            if (distMatrix[0][v] != INF && distMatrix[u][0] != INF) {
+                coutTotalInverse = distMatrix[0][v] + poidsArc + distMatrix[u][0];
+            }
+        }
+
+        // --- 5. AFFICHAGE DU MEILLEUR RÉSULTAT ---
+
+        if (coutTotalDirect == INF && coutTotalInverse == INF) {
+            System.out.println("IMPOSSIBLE : Le camion ne peut pas faire l'aller-retour (problème de sens unique bloquant).");
+            return;
+        }
+
+        System.out.println("\n--- RÉSULTAT DE L'OPTIMISATION ---");
+
+        // On choisit le chemin le moins cher
+        if (coutTotalDirect <= coutTotalInverse) {
+            // Le sens U -> V est meilleur (ou égal)
+            System.out.println(">>> MEILLEURE OPTION : Traverser de " + u + " vers " + v);
+            afficherDetails(0, u, v, 0, poidsArc, coutTotalDirect);
+        } else {
+            // Le sens V -> U est meilleur
+            System.out.println(">>> MEILLEURE OPTION : Traverser de " + v + " vers " + u + " (C'est plus court !)");
+            afficherDetails(0, v, u, 0, poidsArc, coutTotalInverse);
+        }
+    }
+
+    // Affiche les détails d'un itinéraire choisi : Start -> D -> A -> End
+    void afficherDetails(int depot, int debutRue, int finRue, int retour, int poidsRue, int total) {
+        System.out.println("-------------------------------------------");
+
+        System.out.print("1. ALLER (Dépôt -> " + debutRue + ")   : ");
+        printPath(depot, debutRue);
+        System.out.println();
+
+        System.out.println("2. COLLECTE (" + debutRue + " -> " + finRue + ")    : Traversée (" + poidsRue + "m)");
+
+        System.out.print("3. RETOUR (" + finRue + " -> Dépôt)   : ");
+        printPath(finRue, retour);
+        System.out.println();
+
+        System.out.println("-------------------------------------------");
+        System.out.println("DISTANCE TOTALE : " + total + " mètres.");
+    }
+
+    // --- MÉTHODES UTILITAIRES ---
+
+    int getArcWeight(int u, int v) {
+        if (!adj.containsKey(u)) return -1;
+        for (Arc a : adj.get(u)) {
+            if (a.target == v) return a.weight;
+        }
+        return -1;
+    }
+
+    void printPath(int start, int end) {
+        if (start == end) {
+            System.out.print(start + " (Sur place)");
+            return;
+        }
+        if (distMatrix[start][end] == INF) {
+            System.out.print("Chemin impossible");
+            return;
+        }
+        int curr = start;
+        System.out.print(curr);
+        while (curr != end) {
+            curr = nextNode[curr][end];
+            System.out.print(" -> " + curr);
+        }
+        System.out.print(" (" + distMatrix[start][end] + "m)");
+    }
+
+    void computeFloydWarshall() {
+        distMatrix = new int[numNodes][numNodes];
+        nextNode = new int[numNodes][numNodes];
+
+        for (int i = 0; i < numNodes; i++) {
+            Arrays.fill(distMatrix[i], INF);
+            distMatrix[i][i] = 0;
+        }
+
+        for (int u : adj.keySet()) {
+            for (Arc a : adj.get(u)) {
+                if (a.weight < distMatrix[u][a.target]) {
+                    distMatrix[u][a.target] = a.weight;
+                    nextNode[u][a.target] = a.target;
+                }
+            }
+        }
+
+        for (int k = 0; k < numNodes; k++) {
+            for (int i = 0; i < numNodes; i++) {
+                for (int j = 0; j < numNodes; j++) {
+                    if (distMatrix[i][k] + distMatrix[k][j] < distMatrix[i][j]) {
+                        distMatrix[i][j] = distMatrix[i][k] + distMatrix[k][j];
+                        nextNode[i][j] = nextNode[i][k];
+                    }
+                }
+            }
+        }
+    }
+
+    boolean loadGraph(String filename) {
+        try (BufferedReader br = new BufferedReader(new FileReader(filename))) {
+            String line;
+            int maxId = 0;
+            while ((line = br.readLine()) != null) {
+                String[] p = line.trim().split("\\s+");
+                if (p.length == 4) {
+                    int u = Integer.parseInt(p[0]);
+                    int v = Integer.parseInt(p[1]);
+                    int w = Integer.parseInt(p[2]);
+                    int type = Integer.parseInt(p[3]);
+
+                    // Ajout sens U -> V
+                    adj.computeIfAbsent(u, k -> new ArrayList<>()).add(new Arc(v, w));
+                    maxId = Math.max(maxId, Math.max(u, v));
+
+                    // Ajout sens V -> U (Si Type 2 ou 3)
+                    if (type == 2 || type == 3) {
+                        adj.computeIfAbsent(v, k -> new ArrayList<>()).add(new Arc(u, w));
+                    }
+                }
+            }
+            numNodes = maxId + 1;
+            return true;
+        } catch (Exception e) { return false; }
+    }
+}
