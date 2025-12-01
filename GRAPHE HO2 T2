@@ -1,0 +1,101 @@
+SOMMETS 30
+0  D          DEPOT 0
+1  Place_A    POINT 10
+2  Place_B    POINT 15
+3  Ruelle_C   POINT 20
+4  Ave_Nord   POINT 25
+5  Ave_Sud    POINT 30
+6  Impasse_1  POINT 10
+7  Impasse_2  POINT 10
+8  Carrefour  POINT 40
+9  Zone_Est   POINT 35
+10 Zone_Ouest POINT 35
+11 Parc_1     POINT 20
+12 Parc_2     POINT 20
+13 Pont_Vieux POINT 50
+14 Pont_Neuf  POINT 50
+15 ZI_Nord_1  POINT 60
+16 ZI_Nord_2  POINT 55
+17 ZI_Nord_3  POINT 45
+18 ZI_Sud_1   POINT 40
+19 ZI_Sud_2   POINT 30
+20 Vieux_1    POINT 15
+21 Vieux_2    POINT 10
+22 Vieux_3    POINT 10
+23 Vieux_4    POINT 10
+24 Vieux_5    POINT 15
+25 Vieux_6    POINT 15
+26 Foret_1    POINT 25
+27 Foret_2    POINT 30
+28 Foret_3    POINT 20
+29 Foret_4    POINT 35
+
+ARETES 52
+# --- Le Centre Ville (Mixte et dense) ---
+0  1  10.0 U
+0  2  12.0 U
+1  3   5.0 O
+3  2   4.0 O
+2  4  15.0 U
+4  5  10.0 O
+5  0  18.0 O
+1  8  20.0 U
+
+# --- Les Axes Rapides (Double sens U) ---
+4  15 30.0 U
+5  18 30.0 U
+8  10 25.0 U
+8  9  25.0 U
+9  13 40.0 U
+10 14 40.0 U
+
+# --- Le "Vieux Quartier" (Le Piège à sens unique) ---
+# Entrée très tentante depuis le centre (3 -> 20 dist 6)
+3  20  6.0 O
+# À l'intérieur, c'est le labyrinthe (petites rues U)
+20 21  4.0 U
+21 22  3.0 U
+22 23  5.0 U
+23 24  4.0 U
+24 25  5.0 U
+25 20  4.0 U
+# La seule sortie est très loin et ramène en forêt (25 -> 26 dist 45)
+25 26 45.0 O
+
+# --- La Zone Industrielle Nord (Chaotique O) ---
+15 16 10.0 O
+16 17 10.0 O
+17 15 10.0 O
+16 4  35.0 O
+17 9  20.0 O
+
+# --- La Zone Industrielle Sud (Chaotique O) ---
+18 19 12.0 O
+19 5  35.0 O
+19 12 20.0 O
+
+# --- Les Parcs et Forêts (Connections éparses) ---
+11 12 15.0 U
+11 1  30.0 U
+12 18 25.0 U
+
+# Liaison forêt (La sortie du piège arrive ici)
+26 27 10.0 O
+27 28 10.0 O
+28 29 10.0 O
+29 0  60.0 O
+
+# Quelques "Raccourcis" traitres (Orientés)
+# Semble court mais t'envoie au mauvais endroit
+2  10 50.0 O
+6  7   5.0 U
+7  14 80.0 O
+6  1  15.0 O
+13 9  10.0 O
+14 11 20.0 O
+
+# Connexions transversales aléatoires
+13 15 25.0 U
+14 19 25.0 U
+22 6  60.0 O
+9  29 50.0 U
