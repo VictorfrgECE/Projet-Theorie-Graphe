@@ -1,0 +1,145 @@
+import java.io.BufferedReader;
+import java.io.FileReader;
+import java.util.*;
+
+public class Algorithme {
+
+    // --- CHARGEMENT ---
+    public static List<Secteur> chargerGraphe(String cheminFichier) {
+        Map<String, Secteur> mapSecteurs = new HashMap<>();
+        List<Secteur> listeFinale = new ArrayList<>();
+        boolean lectureLiens = false;
+        int idGenerateur = 1;
+
+        try (BufferedReader br = new BufferedReader(new FileReader(cheminFichier))) {
+            String ligne;
+            while ((ligne = br.readLine()) != null) {
+                ligne = ligne.trim();
+                if (ligne.isEmpty() || ligne.startsWith("#")) continue;
+                if (ligne.equals("---")) { lectureLiens = true; continue; }
+
+                String[] parts = ligne.split(";");
+                if (!lectureLiens) {
+                    if (parts.length >= 2) {
+                        String nom = parts[0].trim();
+                        int poids = Integer.parseInt(parts[1].trim());
+                        Secteur s = new Secteur(idGenerateur++, nom, poids);
+                        mapSecteurs.put(nom, s);
+                        listeFinale.add(s);
+                    }
+                } else {
+                    if (parts.length >= 2) {
+                        Secteur s1 = mapSecteurs.get(parts[0].trim());
+                        Secteur s2 = mapSecteurs.get(parts[1].trim());
+                        if (s1 != null && s2 != null) s1.ajouterVoisin(s2);
+                    }
+                }
+            }
+        } catch (Exception e) {
+            System.err.println("Erreur lors du chargement du fichier : " + e.getMessage());
+        }
+        return listeFinale;
+    }
+
+    // --- ALGORITHME (Avec Double Sécurité : Poids + Durée) ---
+    public static boolean planifierAvecContrainte(List<Secteur> secteurs, int capaciteTotaleJour) {
+
+        // SÉCURITÉ 1 : Vérification des poids individuels
+        for (Secteur s : secteurs) {
+            if (s.getPoids() > capaciteTotaleJour) {
+                afficherErreur("PLANIFICATION IMPOSSIBLE (POIDS)",
+                        "Le secteur '" + s.getNom() + "' (" + s.getPoids() + "kg) dépasse la capacité de la flotte (" + capaciteTotaleJour + "kg).");
+                return false;
+            }
+        }
+
+        List<Secteur> tri = new ArrayList<>(secteurs);
+        tri.sort((s1, s2) -> Integer.compare(s2.getDegre(), s1.getDegre()));
+
+        int jourActuel = 0;
+        int nombreTraites = 0;
+        int maxIterations = secteurs.size() * 100;
+        int compteurSecurite = 0;
+
+        while (nombreTraites < secteurs.size()) {
+
+            // SÉCURITÉ 2 : Vérification de la durée (Max 7 jours : index 0 à 6)
+            if (jourActuel > 6) {
+                afficherErreur("PLANIFICATION IMPOSSIBLE (DURÉE)",
+                        "Il est impossible de collecter tous les secteurs en 7 jours (Lundi-Dimanche) avec les contraintes actuelles (voisinage ou capacité).");
+                return false; // On arrête tout
+            }
+
+            int poidsTotalJour = 0;
+            boolean auMoinsUnSecteurPlaceCeJour = false;
+
+            for (Secteur candidat : tri) {
+                if (candidat.getJourPassage() == -1) {
+                    boolean conflit = false;
+                    // Vérif voisins
+                    for (Secteur voisin : candidat.getVoisins()) {
+                        if (voisin.getJourPassage() == jourActuel) {
+                            conflit = true; break;
+                        }
+                    }
+                    // Vérif capacité
+                    if (!conflit) {
+                        if (poidsTotalJour + candidat.getPoids() > capaciteTotaleJour) {
+                            conflit = true;
+                        }
+                    }
+                    // Placement
+                    if (!conflit) {
+                        candidat.setJourPassage(jourActuel);
+                        poidsTotalJour += candidat.getPoids();
+                        nombreTraites++;
+                        auMoinsUnSecteurPlaceCeJour = true;
+                    }
+                }
+            }
+
+            jourActuel++;
+            compteurSecurite++;
+            if (compteurSecurite > maxIterations) return false;
+        }
+
+        return true; // Succès
+    }
+
+    // Méthode utilitaire pour afficher les gros messages d'erreur
+    private static void afficherErreur(String titre, String message) {
+        System.out.println("\n=============================================================");
+        System.err.println(" [ERREUR] " + titre);
+        System.out.println("=============================================================");
+        System.err.println(" " + message);
+        System.out.println("=============================================================\n");
+    }
+
+    // --- AFFICHAGE ---
+    public static void afficherResultats(List<Secteur> ville, int capaciteTotale, int nbCamions, int chargeCamion) {
+        String[] jours = {"Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche"};
+
+        Map<Integer, List<Secteur>> planning = new TreeMap<>();
+        for (Secteur s : ville) planning.computeIfAbsent(s.getJourPassage(), k -> new ArrayList<>()).add(s);
+
+        System.out.println("\n-------------------------------------------------------------");
+        System.out.println(" PLANNING FINAL (Flotte: " + nbCamions + " camions | Capacité Jour: " + capaciteTotale + "kg)");
+        System.out.println("-------------------------------------------------------------");
+
+        for (int j : planning.keySet()) {
+            List<Secteur> groupe = planning.get(j);
+            int chargeTotale = groupe.stream().mapToInt(Secteur::getPoids).sum();
+            int camionsUtilises = (int) Math.ceil((double)chargeTotale / chargeCamion);
+
+            String nomJour = (j < jours.length) ? jours[j] : "Jour " + (j + 1);
+
+            System.out.printf(" %-10s | CHARGE : %4d / %4d kg | CAMIONS REQUIS : %d sur %d\n",
+                    nomJour.toUpperCase(), chargeTotale, capaciteTotale, camionsUtilises, nbCamions);
+
+            for (Secteur s : groupe) {
+                System.out.printf("            > %-15s (%3d kg)\n", s.getNom(), s.getPoids());
+            }
+            System.out.println("-------------------------------------------------------------");
+        }
+    }
+}
