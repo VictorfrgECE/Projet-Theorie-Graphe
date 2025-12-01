@@ -1,0 +1,250 @@
+import java.io.*;
+import java.util.*;
+
+class Route {
+    int u, v, weight;
+    String id;
+    public Route(int u, int v, int weight) {
+        this.u = u;
+        this.v = v;
+        this.weight = weight;
+        this.id = u + "-" + v;
+    }
+}
+
+public class CollecteFinaleDernierGraphe {
+
+    // --- DONNÉES ---
+    List<Route> allEdges = new ArrayList<>();
+    List<Route> todoList = new ArrayList<>();
+    List<Integer> finalPathSequence = new ArrayList<>();
+
+    // Matrices GPS
+    int[][] distMatrixGlobal;   // GPS Standard (Autorise 0)
+    int[][] distMatrixNoDepot;  // GPS "Interdit 0"
+    int[][] nextNodeGlobal;
+    int[][] nextNodeNoDepot;
+
+    int numNodes = 0;
+    final int INF = 999999;
+
+    public static void main(String[] args) {
+        new CollecteFinaleDernierGraphe().run();
+    }
+
+    public void run() {
+        // 1. Chargement
+        String cheminFichier = "/Users/corentinlepeltier/IdeaProjects/eval4/src/graphe.txt";
+        if (!loadGraph(cheminFichier)) {
+            System.out.println("Erreur : Impossible de lire le fichier graphe.txt");
+            return;
+        }
+
+        // 2. Calculs GPS
+        computeMatrices();
+
+        // 3. Sélection
+        Scanner scanner = new Scanner(System.in);
+        System.out.println("--- COLLECTE OPTIMISÉE (Heuristique Reachability) ---");
+        System.out.println("Pour chaque voie, tapez 'o' (oui) ou 'n' (non).");
+
+        for (Route r : allEdges) {
+            System.out.print(" - Voie " + r.u + " -> " + r.v + " (" + r.weight + "m) : ");
+            String rep = scanner.next();
+            if (rep.equalsIgnoreCase("o")) todoList.add(r);
+        }
+
+        if (todoList.isEmpty()) {
+            System.out.println("Rien à collecter.");
+            return;
+        }
+
+        // 4. Exécution
+        System.out.println("\n--- DÉMARRAGE TOURNÉE ---");
+        int currentPos = 0;
+        int totalDist = 0;
+        finalPathSequence.add(0);
+
+        while (!todoList.isEmpty()) {
+            Route bestRoute = null;
+            int bestDist = INF;
+            int maxReachable = -1; // Score d'anticipation
+            boolean useGlobalMatrix = false;
+
+            // Filtre : On ne rentre pas au dépôt si on a encore du travail ailleurs
+            boolean forceReturn = true;
+            for (Route r : todoList) { if (r.v != 0) { forceReturn = false; break; } }
+
+            // ANALYSE DES ROUTES POSSIBLES
+            for (Route r : todoList) {
+                // Règle d'or : On ne finit pas par 0 tant qu'il reste autre chose
+                if (!forceReturn && r.v == 0) continue;
+
+                // 1. Distance pour y aller (Sans passer par 0)
+                int d = distMatrixNoDepot[currentPos][r.u];
+                if (d >= INF) continue; // Inaccessible sans le dépôt
+
+                // 2. SIMULATION (Look-ahead) :
+                // "Si je vais faire cette tâche, combien d'autres tâches resteront accessibles sans repasser par 0 ?"
+                int reachableCount = countReachableTasks(r.v, r);
+
+                boolean isBetter = false;
+                // On privilégie la route qui laisse le plus d'options ouvertes
+                if (reachableCount > maxReachable) {
+                    isBetter = true;
+                } else if (reachableCount == maxReachable) {
+                    // À options égales, on prend la plus proche
+                    if (d < bestDist) isBetter = true;
+                }
+
+                if (isBetter) {
+                    maxReachable = reachableCount;
+                    bestDist = d;
+                    bestRoute = r;
+                    useGlobalMatrix = false;
+                }
+            }
+
+            // Fallback : Si on est coincé, on autorise exceptionnellement le passage par 0
+            if (bestRoute == null) {
+                for (Route r : todoList) {
+                    if (!forceReturn && r.v == 0) continue;
+                    int d = distMatrixGlobal[currentPos][r.u];
+                    if (d < bestDist) {
+                        bestDist = d;
+                        bestRoute = r;
+                        useGlobalMatrix = true;
+                    }
+                }
+            }
+
+            if (bestRoute == null) {
+                System.out.println("ERREUR : Impossible de continuer (Graphe déconnecté ou cul-de-sac).");
+                break;
+            }
+
+            // MOUVEMENT
+            if (bestDist > 0) {
+                String type = useGlobalMatrix ? "[⚠️ VIA DÉPÔT]" : "[Contournement OK]";
+                System.out.println("   [Trajet] " + currentPos + " -> " + bestRoute.u + " (" + bestDist + "m) " + type);
+
+                if (useGlobalMatrix) addPathToSequence(currentPos, bestRoute.u, nextNodeGlobal);
+                else addPathToSequence(currentPos, bestRoute.u, nextNodeNoDepot);
+
+                totalDist += bestDist;
+            }
+
+            // COLLECTE
+            System.out.println("   [Collecte] " + bestRoute.u + " -> " + bestRoute.v + " (" + bestRoute.weight + "m)");
+            finalPathSequence.add(bestRoute.v);
+            totalDist += bestRoute.weight;
+            currentPos = bestRoute.v;
+            todoList.remove(bestRoute);
+        }
+
+        // RETOUR FINAL
+        if (currentPos != 0) {
+            int dRetour = distMatrixGlobal[currentPos][0];
+            System.out.println("   [Fin] Retour au dépôt (" + dRetour + "m)");
+            addPathToSequence(currentPos, 0, nextNodeGlobal);
+            totalDist += dRetour;
+        }
+
+        // AFFICHAGE FINAL
+        System.out.println("\n===========================================");
+        System.out.println("DISTANCE TOTALE : " + totalDist + " mètres");
+        System.out.print("CHEMIN COMPLET : ");
+        for (int i = 0; i < finalPathSequence.size(); i++) {
+            System.out.print(finalPathSequence.get(i));
+            if (i < finalPathSequence.size() - 1) System.out.print(" -> ");
+        }
+        System.out.println("\n===========================================");
+    }
+
+    // --- ALGORITHMES & OUTILS ---
+
+    // Heuristique : Compte les tâches accessibles sans passer par 0
+    int countReachableTasks(int startNode, Route ignoreTask) {
+        int count = 0;
+        for (Route r : todoList) {
+            if (r == ignoreTask) continue;
+            // On vérifie l'accessibilité avec la matrice "NoDepot"
+            if (distMatrixNoDepot[startNode][r.u] < INF) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    void computeMatrices() {
+        distMatrixGlobal = new int[numNodes][numNodes];
+        distMatrixNoDepot = new int[numNodes][numNodes];
+        nextNodeGlobal = new int[numNodes][numNodes];
+        nextNodeNoDepot = new int[numNodes][numNodes];
+
+        for (int i = 0; i < numNodes; i++) {
+            Arrays.fill(distMatrixGlobal[i], INF);
+            Arrays.fill(distMatrixNoDepot[i], INF);
+            distMatrixGlobal[i][i] = 0;
+            distMatrixNoDepot[i][i] = 0;
+        }
+
+        for (Route r : allEdges) {
+            if (r.weight < distMatrixGlobal[r.u][r.v]) {
+                distMatrixGlobal[r.u][r.v] = r.weight;
+                nextNodeGlobal[r.u][r.v] = r.v;
+
+                distMatrixNoDepot[r.u][r.v] = r.weight;
+                nextNodeNoDepot[r.u][r.v] = r.v;
+            }
+        }
+
+        // Floyd-Warshall Global
+        for (int k = 0; k < numNodes; k++)
+            for (int i = 0; i < numNodes; i++)
+                for (int j = 0; j < numNodes; j++)
+                    if (distMatrixGlobal[i][k] + distMatrixGlobal[k][j] < distMatrixGlobal[i][j]) {
+                        distMatrixGlobal[i][j] = distMatrixGlobal[i][k] + distMatrixGlobal[k][j];
+                        nextNodeGlobal[i][j] = nextNodeGlobal[i][k];
+                    }
+
+        // Floyd-Warshall NoDepot (k commence à 1 pour ignorer le 0 comme pivot)
+        for (int k = 1; k < numNodes; k++)
+            for (int i = 0; i < numNodes; i++)
+                for (int j = 0; j < numNodes; j++)
+                    if (distMatrixNoDepot[i][k] + distMatrixNoDepot[k][j] < distMatrixNoDepot[i][j]) {
+                        distMatrixNoDepot[i][j] = distMatrixNoDepot[i][k] + distMatrixNoDepot[k][j];
+                        nextNodeNoDepot[i][j] = nextNodeNoDepot[i][k];
+                    }
+    }
+
+    void addPathToSequence(int start, int end, int[][] nextNodeMat) {
+        if (start == end) return;
+        int curr = start;
+        while (curr != end) {
+            curr = nextNodeMat[curr][end];
+            finalPathSequence.add(curr);
+        }
+    }
+
+    boolean loadGraph(String filename) {
+        try (BufferedReader br = new BufferedReader(new FileReader(filename))) {
+            String line;
+            int maxId = 0;
+            while ((line = br.readLine()) != null) {
+                String[] p = line.trim().split("\\s+");
+                if (p.length >= 4) {
+                    int u = Integer.parseInt(p[0]);
+                    int v = Integer.parseInt(p[1]);
+                    int w = Integer.parseInt(p[2]);
+                    int type = Integer.parseInt(p[3]);
+                    allEdges.add(new Route(u, v, w));
+                    if (type == 2) allEdges.add(new Route(v, u, w));
+                    maxId = Math.max(maxId, Math.max(u, v));
+                }
+            }
+            numNodes = maxId + 1;
+            return true;
+        } catch (Exception e) { return false; }
+    }
+}
