@@ -1,0 +1,458 @@
+import java.io.BufferedReader;
+import java.io.FileReader;
+import java.util.*;
+
+public class CollecteFichier {
+
+
+    static class Arete {
+        int u, v;
+        int poids;
+        int id;
+        static int nextId = 0;
+        boolean estRamassage;
+        boolean estTransit;
+
+        public Arete(int u, int v, int poids, boolean estRamassage) {
+            this.u = u;
+            this.v = v;
+            this.poids = poids;
+            this.estRamassage = estRamassage;
+            this.estTransit = !estRamassage;
+            this.id = nextId++;
+        }
+
+        // Constructeur pour les arêtes dupliquées de ramassage
+        public Arete(Arete original, boolean isDupliquee) {
+            this(original.u, original.v, original.poids, original.estRamassage);
+            this.estTransit = false;
+        }
+
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) return true;
+            if (o == null || getClass() != o.getClass()) return false;
+            Arete arete = (Arete) o;
+            return id == arete.id;
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(id);
+        }
+
+        @Override
+        public String toString() { return u + "-" + v; }
+    }
+
+    static class ResultatCouplage {
+        int cout;
+        List<Arete> aretesAjoutees;
+        public ResultatCouplage(int cout, List<Arete> aretes) {
+            this.cout = cout; this.aretesAjoutees = aretes;
+        }
+    }
+
+    static final int INF = 9999999;
+    // REMPLACER ce chemin par votre chemin d'accès réel au fichier "graphe"
+    static final String CHEMIN_FICHIER = "graphe";
+
+    static List<Arete> grapheInitial = new ArrayList<>();
+    static int[][] distMatrice;
+    static int[][] nextNode;
+    static int maxNodeId = 0;
+
+    public static void main(String[] args) {
+        if (!chargerGrapheDepuisFichier(CHEMIN_FICHIER)) return;
+        calculerFloydWarshall();
+
+        Scanner scanner = new Scanner(System.in);
+        List<Arete> aretesAVisiter = new ArrayList<>();
+
+        System.out.println("\n--- SÉLECTION DES RUES (ENCOMBRANTS) ---");
+
+        List<Arete> arList = new ArrayList<>(grapheInitial);
+
+        Arete.nextId = grapheInitial.size();
+
+        for (Arete a : arList) {
+            System.out.print("Rue " + a.u + "-" + a.v + " (" + a.poids + "m) ? [o/n] : ");
+            String rep = scanner.nextLine().trim().toLowerCase();
+            if (rep.startsWith("o") || rep.equals("1")) {
+                Arete copie = new Arete(a.u, a.v, a.poids, true);
+                aretesAVisiter.add(copie);
+            }
+        }
+
+        if (aretesAVisiter.isEmpty()) {
+            System.out.println("Aucune rue sélectionnée.");
+            return;
+        }
+
+        calculerEtAfficherItineraire(aretesAVisiter);
+        scanner.close();
+    }
+
+    private static void calculerEtAfficherItineraire(List<Arete> aretesRequises) {
+
+        List<Arete> grapheEulerien = new ArrayList<>();
+        int coutRamassage = 0;
+
+        Map<Integer, Integer> degres = new HashMap<>();
+
+        if (!aretesRequises.isEmpty()) {
+            Arete.nextId = aretesRequises.get(aretesRequises.size() - 1).id + 1;
+        }
+
+        for (Arete a : aretesRequises) {
+            coutRamassage += a.poids;
+
+            grapheEulerien.add(a);
+            grapheEulerien.add(new Arete(a, true));
+        }
+
+        for (Arete a : grapheEulerien) {
+            degres.put(a.u, degres.getOrDefault(a.u, 0) + 1);
+            degres.put(a.v, degres.getOrDefault(a.v, 0) + 1);
+        }
+
+        List<Integer> impairs = new ArrayList<>();
+        for (Map.Entry<Integer, Integer> e : degres.entrySet()) {
+            if (e.getValue() % 2 != 0) impairs.add(e.getKey());
+        }
+
+        int coutTransit = 0;
+        if (!impairs.isEmpty()) {
+
+            ResultatCouplage res = trouverMeilleurCouplage(impairs);
+            coutTransit = res.cout;
+            grapheEulerien.addAll(res.aretesAjoutees);
+            Arete.nextId = grapheEulerien.get(grapheEulerien.size() - 1).id + 1;
+        }
+
+        reconnecterComposantes(grapheEulerien);
+
+        int coutTotal = (2 * coutRamassage) + coutTransit;
+
+        System.out.println("\n[INFO] Noeuds impairs détectés : " + impairs);
+        System.out.println("[INFO] Coût du transit optimal : " + coutTransit + " m");
+
+        System.out.println("\n---------------- RÉSULTAT ----------------");
+        System.out.println("DISTANCE TOTALE OPTIMALE : " + coutTotal + " m");
+        System.out.println("------------------------------------------");
+
+        Map<Integer, LinkedList<Arete>> adj = new HashMap<>();
+        for (Arete a : grapheEulerien) {
+            adj.computeIfAbsent(a.u, k -> new LinkedList<>()).add(a);
+            adj.computeIfAbsent(a.v, k -> new LinkedList<>()).add(a);
+        }
+
+        int noeudDepart = -1;
+        if (adj.containsKey(0) && !adj.get(0).isEmpty()) {
+            noeudDepart = 0;
+        } else {
+            for(Map.Entry<Integer, LinkedList<Arete>> entry : adj.entrySet()) {
+                if (!entry.getValue().isEmpty()) {
+                    noeudDepart = entry.getKey();
+                    break;
+                }
+            }
+        }
+
+        if (noeudDepart == -1) {
+            System.err.println("Erreur: Le graphe eulérien est vide ou mal formé.");
+            return;
+        }
+
+        List<Arete> cheminFinalAretes = trouverCycleEulerien(noeudDepart, adj);
+
+        if (cheminFinalAretes.isEmpty() && !grapheEulerien.isEmpty()) {
+            System.err.println("Erreur: Le graphe est valide mais l'itinéraire est vide. Problème de connexité ou d'implémentation.");
+            return;
+        }
+
+        afficherItineraireFinal(cheminFinalAretes, noeudDepart);
+    }
+
+    private static void reconnecterComposantes(List<Arete> grapheEulerien) {
+        Map<Integer, List<Integer>> adj = new HashMap<>();
+        Set<Integer> noeudsPresents = new HashSet<>();
+        for (Arete a : grapheEulerien) {
+            adj.computeIfAbsent(a.u, k -> new ArrayList<>()).add(a.v);
+            adj.computeIfAbsent(a.v, k -> new ArrayList<>()).add(a.u);
+            noeudsPresents.add(a.u);
+            noeudsPresents.add(a.v);
+        }
+
+        if (noeudsPresents.size() <= 1) return;
+
+        Set<Integer> visite = new HashSet<>();
+        List<Set<Integer>> composantes = new ArrayList<>();
+
+        for (Integer noeud : noeudsPresents) {
+            if (!visite.contains(noeud)) {
+                Set<Integer> comp = new HashSet<>();
+                Queue<Integer> q = new LinkedList<>();
+                q.add(noeud);
+                visite.add(noeud);
+
+                while (!q.isEmpty()) {
+                    int u = q.poll();
+                    comp.add(u);
+                    if (!adj.containsKey(u)) continue;
+                    for (int v : adj.get(u)) {
+                        if (!visite.contains(v)) {
+                            visite.add(v);
+                            q.add(v);
+                        }
+                    }
+                }
+                if (!comp.isEmpty()) composantes.add(comp);
+            }
+        }
+
+        if (composantes.size() <= 1) return;
+
+        Set<Integer> base = composantes.get(0);
+        for (int i = 1; i < composantes.size(); i++) {
+            Set<Integer> autre = composantes.get(i);
+
+            int meilleurU = -1, meilleurV = -1, meilleurCout = INF;
+
+            for (int u : base) {
+                for (int v : autre) {
+                    if (distMatrice[u][v] < meilleurCout) {
+                        meilleurCout = distMatrice[u][v];
+                        meilleurU = u;
+                        meilleurV = v;
+                    }
+                }
+            }
+
+            if (meilleurU != -1) {
+                grapheEulerien.add(new Arete(meilleurU, meilleurV, meilleurCout, false));
+                base.addAll(autre);
+            }
+        }
+    }
+
+    private static List<Arete> trouverCycleEulerien(int start, Map<Integer, LinkedList<Arete>> adj) {
+        Stack<Integer> pile = new Stack<>();
+        List<Arete> circuit = new ArrayList<>();
+        Stack<Arete> pileAretes = new Stack<>();
+
+        pile.push(start);
+
+        while (!pile.isEmpty()) {
+            int u = pile.peek();
+            if (!adj.containsKey(u) || adj.get(u).isEmpty()) {
+                pile.pop();
+                if (!pileAretes.isEmpty()) {
+                    circuit.add(pileAretes.pop());
+                }
+            } else {
+                Arete a = adj.get(u).pop();
+                int v = (a.u == u ? a.v : a.u);
+
+                LinkedList<Arete> listeOpposee = adj.get(v);
+                if (listeOpposee != null) {
+                    Iterator<Arete> it = listeOpposee.iterator();
+                    while (it.hasNext()) {
+                        Arete e = it.next();
+                        if (e.id == a.id) {
+                            it.remove();
+                            break;
+                        }
+                    }
+                }
+
+                pile.push(v);
+                pileAretes.push(a);
+            }
+        }
+
+        Collections.reverse(circuit);
+        return circuit;
+    }
+
+
+    private static void afficherItineraireFinal(List<Arete> chemin, int noeudInitial) {
+        if (chemin.isEmpty()) return;
+
+        System.out.println("\n--- ITINÉRAIRE DÉTAILLÉ ---");
+        System.out.println("DÉPART du carrefour : " + noeudInitial);
+        System.out.println("------------------------------------------");
+
+        int noeudActuel = noeudInitial;
+
+        int startIndex = -1;
+        for (int i = 0; i < chemin.size(); i++) {
+            Arete a = chemin.get(i);
+            if (a.u == noeudInitial || a.v == noeudInitial) {
+                startIndex = i;
+                break;
+            }
+        }
+
+        if (startIndex == -1) startIndex = 0;
+
+        List<Arete> cheminReordonne = new ArrayList<>();
+        for (int i = startIndex; i < chemin.size(); i++) cheminReordonne.add(chemin.get(i));
+        for (int i = 0; i < startIndex; i++) cheminReordonne.add(chemin.get(i));
+
+        for (Arete a : cheminReordonne) {
+            int destination;
+            if (a.u == noeudActuel) {
+                destination = a.v;
+            } else if (a.v == noeudActuel) {
+                destination = a.u;
+            } else {
+                System.err.println("Erreur critique : Arête non connectée au nœud actuel " + noeudActuel);
+                return;
+            }
+
+            if (a.estRamassage) {
+                System.out.println("-> Traverser rue " + noeudActuel + " -> " + destination + " (Distance : " + a.poids + "m)");
+            } else {
+                afficherTransit(noeudActuel, destination);
+            }
+
+            noeudActuel = destination;
+        }
+
+        // --- CORRECTION CRUCIALE : AJOUT DU TRANSIT FINAL ---
+        System.out.println("------------------------------------------");
+
+        if (noeudActuel != noeudInitial) {
+            System.out.println("\n[TRANSIT FINAL] Le cycle doit se refermer sur le point de départ.");
+            // Afficher le chemin de transit du dernier nœud au nœud initial
+            afficherTransit(noeudActuel, noeudInitial);
+            noeudActuel = noeudInitial; // Mettre à jour pour la cohérence du message final
+        }
+        // ----------------------------------------------------
+
+        System.out.println("FIN DE LA TOURNÉE (Retour au carrefour " + noeudInitial + ")");
+    }
+
+    private static void afficherTransit(int depart, int arrivee) {
+        if (depart == arrivee) return;
+
+        int distT = distMatrice[depart][arrivee];
+
+        if (distT >= INF) {
+            System.err.println("-> [ERREUR TRANSIT] Impossible de trouver un chemin de " + depart + " à " + arrivee);
+            return;
+        }
+
+        if (nextNode[depart][arrivee] == arrivee) {
+            System.out.println("->  Déplacement direct " + depart + " -> " + arrivee + " (Distance : " + distT + "m)");
+            return;
+        }
+
+        System.out.print("-> Déplacement de " + depart + " à " + arrivee + " (Total " + distT + "m) via : ");
+
+        int cur = depart;
+        StringBuilder path = new StringBuilder();
+        cur = nextNode[cur][arrivee];
+
+        while (cur != arrivee) {
+            path.append(cur).append(" -> ");
+            cur = nextNode[cur][arrivee];
+        }
+        path.append(arrivee);
+
+        System.out.println(path.toString());
+    }
+
+    private static ResultatCouplage trouverMeilleurCouplage(List<Integer> impairs) {
+        if (impairs.isEmpty()) return new ResultatCouplage(0, new ArrayList<>());
+
+        int u = impairs.get(0);
+        int minCout = INF;
+        List<Arete> meilleurAjout = null;
+
+        for (int i = 1; i < impairs.size(); i++) {
+            int v = impairs.get(i);
+
+            if (distMatrice[u][v] >= INF) continue;
+
+            List<Integer> reste = new ArrayList<>(impairs);
+            reste.remove((Integer)v);
+            reste.remove((Integer)u);
+
+            ResultatCouplage resReste = trouverMeilleurCouplage(reste);
+
+            if (resReste.cout >= INF) continue;
+
+            int coutActuel = distMatrice[u][v] + resReste.cout;
+
+            if (coutActuel < minCout) {
+                minCout = coutActuel;
+                meilleurAjout = new ArrayList<>();
+                meilleurAjout.add(new Arete(u, v, distMatrice[u][v], false));
+                meilleurAjout.addAll(resReste.aretesAjoutees);
+            }
+        }
+        return new ResultatCouplage(minCout, meilleurAjout != null ? meilleurAjout : new ArrayList<>());
+    }
+
+    private static void calculerFloydWarshall() {
+        int n = maxNodeId + 1;
+        distMatrice = new int[n][n]; nextNode = new int[n][n];
+
+        for (int i = 0; i < n; i++) {
+            Arrays.fill(distMatrice[i], INF);
+            Arrays.fill(nextNode[i], -1);
+            distMatrice[i][i] = 0;
+        }
+
+        for (Arete a : grapheInitial) {
+            if (a.poids < distMatrice[a.u][a.v]) {
+                distMatrice[a.u][a.v] = a.poids;
+                distMatrice[a.v][a.u] = a.poids;
+                nextNode[a.u][a.v] = a.v;
+                nextNode[a.v][a.u] = a.u;
+            }
+        }
+
+        for (int k = 0; k < n; k++) {
+            for (int i = 0; i < n; i++) {
+                for (int j = 0; j < n; j++) {
+                    if (distMatrice[i][k] != INF && distMatrice[k][j] != INF) {
+                        if (distMatrice[i][k] + distMatrice[k][j] < distMatrice[i][j]) {
+                            distMatrice[i][j] = distMatrice[i][k] + distMatrice[k][j];
+                            nextNode[i][j] = nextNode[i][k];
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private static boolean chargerGrapheDepuisFichier(String chemin) {
+        grapheInitial.clear();
+        Arete.nextId = 0;
+        maxNodeId = 0;
+        try (BufferedReader br = new BufferedReader(new FileReader(chemin))) {
+            String ligne;
+            while ((ligne = br.readLine()) != null) {
+                ligne = ligne.trim();
+                if (ligne.isEmpty()) continue;
+                String[] p = ligne.split("\\s+");
+                if (p.length >= 3) {
+                    int u = Integer.parseInt(p[0]);
+                    int v = Integer.parseInt(p[1]);
+                    int w = Integer.parseInt(p[2]);
+                    grapheInitial.add(new Arete(u, v, w, false));
+                    maxNodeId = Math.max(maxNodeId, Math.max(u, v));
+                }
+            }
+            return true;
+        } catch (Exception e) {
+            System.err.println("Erreur lecture fichier : " + e.getMessage());
+            System.err.println("Veuillez vous assurer que le chemin " + chemin + " est correct.");
+            return false;
+        }
+    }
+}
