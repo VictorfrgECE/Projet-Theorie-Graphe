@@ -1,1 +1,143 @@
+import java.io.*;
+import java.util.*;
+
+class Edge {
+    int target;
+    int weight;
+    public Edge(int target, int weight) { this.target = target; this.weight = weight; }
+}
+
+public class CollecteArcBoucle {
+
+    private Map<Integer, List<Edge>> graph = new HashMap<>();
+    private Map<Integer, Integer> dist = new HashMap<>();
+    private Map<Integer, Integer> prev = new HashMap<>();
+
+    public static void main(String[] args) {
+        new CollecteArcBoucle().run();
+    }
+
+    public void run() {
+        // 1. Chargement
+        if (!loadGraph("/Users/corentinlepeltier/IdeaProjects/eval4/out/production/eval4/graphe.txt")) return;
+
+        Scanner scanner = new Scanner(System.in);
+        System.out.println("--- COLLECTE SUR UN ARC (MAISON) ---");
+
+        int u = -1, v = -1;
+        int edgeWeight = -1;
+
+        // --- BOUCLE DE VALIDATION ---
+        while (true) {
+            try {
+                System.out.print("Entrez le 1er sommet : ");
+                u = scanner.nextInt();
+                System.out.print("Entrez le 2e sommet  : ");
+                v = scanner.nextInt();
+
+                // Vérification existence de l'arc
+                edgeWeight = getEdgeWeight(u, v);
+
+                if (edgeWeight != -1) {
+                    System.out.println("OK ! Maison située sur l'arc " + u + "-" + v + " (" + edgeWeight + "m).");
+                    break; // Sortie de la boucle car saisie valide
+                } else {
+                    System.err.println("ERREUR : Aucune route directe entre " + u + " et " + v + ". Réessayez.\n");
+                }
+            } catch (InputMismatchException e) {
+                System.out.println("Erreur : Veuillez entrer des nombres entiers.\n");
+                scanner.next(); // Vider le buffer du scanner
+            }
+        }
+        // -----------------------------
+
+        // 2. Calcul des chemins (Dijkstra depuis dépôt 0)
+        computeDijkstra(0);
+
+        // 3. Construction itinéraire : 0 -> u -> v -> 0
+        List<Integer> pathAller = buildPath(u);
+        List<Integer> pathRetour = buildPath(v);
+        Collections.reverse(pathRetour);
+
+        // 4. Affichage
+        System.out.println("\n--- ITINÉRAIRE CALCULÉ ---");
+        System.out.print("Trajet : ");
+        printList(pathAller);
+        System.out.print(" -> " + v + " -> ");
+        printList(pathRetour.subList(1, pathRetour.size()));
+
+        int totalDist = dist.get(u) + edgeWeight + dist.get(v);
+        System.out.println("\n\nDistance totale : " + totalDist + " mètres");
+    }
+
+    // Retourne le poids si l'arc existe, sinon -1
+    private int getEdgeWeight(int u, int v) {
+        if (!graph.containsKey(u)) return -1;
+        for (Edge e : graph.get(u)) {
+            if (e.target == v) return e.weight;
+        }
+        return -1;
+    }
+
+    private void computeDijkstra(int start) {
+        PriorityQueue<int[]> pq = new PriorityQueue<>(Comparator.comparingInt(a -> a[1]));
+        for (Integer node : graph.keySet()) dist.put(node, Integer.MAX_VALUE);
+        dist.put(start, 0);
+        pq.add(new int[]{start, 0});
+
+        while (!pq.isEmpty()) {
+            int[] current = pq.poll();
+            int currNode = current[0];
+            int d = current[1];
+
+            if (d > dist.get(currNode)) continue;
+
+            for (Edge e : graph.getOrDefault(currNode, new ArrayList<>())) {
+                if (dist.get(currNode) + e.weight < dist.get(e.target)) {
+                    dist.put(e.target, dist.get(currNode) + e.weight);
+                    prev.put(e.target, currNode);
+                    pq.add(new int[]{e.target, dist.get(e.target)});
+                }
+            }
+        }
+    }
+
+    private List<Integer> buildPath(int target) {
+        LinkedList<Integer> path = new LinkedList<>();
+        Integer curr = target;
+        if (dist.get(target) == Integer.MAX_VALUE) return path;
+        while (curr != null) {
+            path.addFirst(curr);
+            curr = prev.get(curr);
+        }
+        return path;
+    }
+
+    private void printList(List<Integer> list) {
+        for (int i = 0; i < list.size(); i++) {
+            System.out.print(list.get(i));
+            if (i < list.size() - 1) System.out.print(" -> ");
+        }
+    }
+
+    private boolean loadGraph(String filename) {
+        try (BufferedReader br = new BufferedReader(new FileReader(filename))) {
+            String line;
+            while ((line = br.readLine()) != null) {
+                String[] parts = line.trim().split("\\s+");
+                if (parts.length == 3) {
+                    int u = Integer.parseInt(parts[0]);
+                    int v = Integer.parseInt(parts[1]);
+                    int w = Integer.parseInt(parts[2]);
+                    graph.computeIfAbsent(u, k -> new ArrayList<>()).add(new Edge(v, w));
+                    graph.computeIfAbsent(v, k -> new ArrayList<>()).add(new Edge(u, w));
+                }
+            }
+            return true;
+        } catch (IOException e) {
+            System.err.println("Erreur lecture fichier : " + filename);
+            return false;
+        }
+    }
+}
 
