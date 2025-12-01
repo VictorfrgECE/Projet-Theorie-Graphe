@@ -1,0 +1,57 @@
+import java.util.List;
+import java.util.Scanner;
+
+public class Main {
+
+    public static void main(String[] args) {
+        Scanner sc = new Scanner(System.in);
+        String fichierDonnees = "graphe_h2.txt"; // Assurez-vous que le nom est bon
+
+        System.out.println("=== CONFIGURATION DE LA COLLECTE ===");
+
+        // 1. Paramètres utilisateur
+        int nbCamions = demanderEntier(sc, "Combien de camions sont disponibles ?", 2);
+        int chargeMax = demanderEntier(sc, "Quelle est la capacité max d'un camion (kg) ?", 800);
+
+        int capaciteTotaleJour = nbCamions * chargeMax;
+
+        System.out.println("\n--- RÉSUMÉ PARAMÈTRES ---");
+        System.out.println("• Fichier : " + fichierDonnees);
+        System.out.println("• Flotte  : " + nbCamions + " camions de " + chargeMax + "kg");
+        System.out.println("• Capacité de collecte par jour : " + capaciteTotaleJour + " kg");
+        System.out.println("-------------------------------------------------------------");
+
+        // 2. Chargement
+        List<Secteur> ville = Algorithme.chargerGraphe(fichierDonnees);
+
+        if (ville.isEmpty()) {
+            System.out.println("Erreur : Aucun secteur chargé ou fichier introuvable.");
+            return;
+        }
+
+        // 3. Calcul AVEC gestion d'erreur
+        // La méthode retourne maintenant true ou false
+        boolean succes = Algorithme.planifierAvecContrainte(ville, capaciteTotaleJour);
+
+        // 4. Affichage conditionnel
+        if (succes) {
+            // Si le calcul a réussi, on affiche le tableau
+            Algorithme.afficherResultats(ville, capaciteTotaleJour, nbCamions, chargeMax);
+        } else {
+            // Si le calcul a échoué (message d'erreur déjà affiché par Algorithme), on arrête proprement
+            System.out.println(">> Fin du programme suite à une erreur de planification.");
+        }
+    }
+
+    public static int demanderEntier(Scanner sc, String message, int valeurParDefaut) {
+        System.out.print(message + " [Entrée pour " + valeurParDefaut + "] : ");
+        String saisie = sc.nextLine().trim();
+        if (saisie.isEmpty()) return valeurParDefaut;
+        try {
+            return Integer.parseInt(saisie);
+        } catch (NumberFormatException e) {
+            System.out.println("   -> Valeur invalide. Utilisation du défaut : " + valeurParDefaut);
+            return valeurParDefaut;
+        }
+    }
+}
