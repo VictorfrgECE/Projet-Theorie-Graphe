@@ -1,0 +1,436 @@
+import java.util.*;
+
+class AlgorithmesTSP {
+
+
+    public static List<Integer> approchePlusProcheVoisin(Graphe g, int idDepot) {
+        List<Integer> ordreVisite = new ArrayList<>();
+        Set<Integer> aVisiter = new HashSet<>();
+
+        for (Sommet s : g.getTousLesSommets()) {
+            if (!s.depot && s.contenance > 0) {
+                aVisiter.add(s.id);
+            }
+        }
+
+        int courant = idDepot;
+        // On ne met pas le dépôt au début de la liste logique, car la méthode de découpage
+        // s'attend à une liste de points de collecte [P1, P2, P3...].
+        // Le dépôt sera géré par le découpage.
+
+        while (!aVisiter.isEmpty()) {
+            Graphe.DijkstraResult res = g.dijkstra(courant);
+
+            int meilleurVoisin = -1;
+            double meilleurDist = Double.POSITIVE_INFINITY;
+
+            for (int candidat : aVisiter) {
+                double d = res.dist[candidat];
+                if (d < meilleurDist) {
+                    meilleurDist = d;
+                    meilleurVoisin = candidat;
+                }
+            }
+
+            if (meilleurVoisin == -1) {
+                System.out.println("ATTENTION : Impossible d'atteindre les points restants depuis " + courant + " (Graphe orienté déconnecté ?)");
+                break;
+            }
+
+            ordreVisite.add(meilleurVoisin);
+            aVisiter.remove(meilleurVoisin);
+            courant = meilleurVoisin;
+        }
+
+        return ordreVisite;
+    }
+public class Arete {
+    int from;
+    int to;
+    double poids;
+
+    public Arete(int from, int to, double poids) {
+        this.from = from;
+        this.to = to;
+        this.poids = poids;
+    }
+}
+import java.util.*;
+
+public class Graphe {
+    private List<Sommet> sommets = new ArrayList<>();
+    private Map<Integer, List<Arete>> adjacence = new HashMap<>();
+
+    public void ajouterSommet(Sommet s) {
+        while (sommets.size() <= s.id) {
+            sommets.add(null);
+        }
+        sommets.set(s.id, s);
+        adjacence.putIfAbsent(s.id, new ArrayList<>());
+    }
+
+    public void ajouterArete(int u, int v, double poids) {
+        adjacence.putIfAbsent(u, new ArrayList<>());
+        adjacence.putIfAbsent(v, new ArrayList<>());
+        adjacence.get(u).add(new Arete(u, v, poids));
+    }
+
+    public void ajouterAreteNonOriente(int u, int v, double poids) {
+        ajouterArete(u, v, poids);
+        ajouterArete(v, u, poids);
+    }
+
+    public Sommet getSommet(int id) {
+        if (id < 0 || id >= sommets.size()) return null;
+        return sommets.get(id);
+    }
+
+    public int getNombreSommets() {
+        return sommets.size();
+    }
+
+    public List<Arete> getVoisins(int id) {
+        return adjacence.getOrDefault(id, Collections.emptyList());
+    }
+
+    public List<Sommet> getTousLesSommets() {
+        List<Sommet> res = new ArrayList<>();
+        for (Sommet s : sommets) {
+            if (s != null) res.add(s);
+        }
+        return res;
+    }
+
+    // --- DIJKSTRA STANDARD ---
+    // Retourne {distances[], parents[]}
+    public DijkstraResult dijkstra(int sourceId) {
+        int n = getNombreSommets();
+        double[] dist = new double[n];
+        int[] parent = new int[n];
+        boolean[] visite = new boolean[n];
+
+        Arrays.fill(dist, Double.POSITIVE_INFINITY);
+        Arrays.fill(parent, -1);
+        dist[sourceId] = 0.0;
+
+        // PriorityQueue stocke {distance, sommetId}
+        PriorityQueue<double[]> pq = new PriorityQueue<>(Comparator.comparingDouble(a -> a[0]));
+        pq.add(new double[]{0.0, sourceId});
+
+        while (!pq.isEmpty()) {
+            double[] courant = pq.poll();
+            double d = courant[0];
+            int u = (int) courant[1];
+
+            if (visite[u]) continue;
+            visite[u] = true;
+
+            for (Arete e : getVoisins(u)) {
+                int v = e.to;
+                if (dist[u] + e.poids < dist[v]) {
+                    dist[v] = dist[u] + e.poids;
+                    parent[v] = u;
+                    pq.add(new double[]{dist[v], v});
+                }
+            }
+        }
+        return new DijkstraResult(dist, parent);
+    }
+
+    // Calcule la matrice de distances complètes (tous vers tous)
+    public double[][] calculerMatriceDistances() {
+        int n = getNombreSommets();
+        double[][] mat = new double[n][n];
+        for (int i = 0; i < n; i++) {
+            if (getSommet(i) == null) continue;
+            DijkstraResult res = dijkstra(i);
+            mat[i] = res.dist;
+        }
+        return mat;
+    }
+
+    // Reconstruit le chemin physique (liste de noeuds) de source à cible
+    public List<Integer> getPlusCourtCheminPhysique(int source, int cible) {
+        DijkstraResult res = dijkstra(source);
+        List<Integer> chemin = new ArrayList<>();
+        if (res.dist[cible] == Double.POSITIVE_INFINITY) return chemin; // Pas de chemin
+
+        int curr = cible;
+        while (curr != -1) {
+            chemin.add(curr);
+            if (curr == source) break;
+            curr = res.parent[curr];
+        }
+        Collections.reverse(chemin);
+        return chemin;
+    }
+
+    public static class DijkstraResult {
+        public double[] dist;
+        public int[] parent;
+
+        public DijkstraResult(double[] dist, int[] parent) {
+            this.dist = dist;
+            this.parent = parent;
+        }
+    }
+}
+import java.io.File;
+import java.io.FileNotFoundException;
+import java.util.*;
+
+class LecteurGraphe {
+
+    public static Graphe chargerDepuisFichier(String nomFichier) throws FileNotFoundException {
+        Graphe g = new Graphe();
+        // Essayer de lire directement le fichier (chemin relatif)
+        File f = new File(nomFichier);
+        if (!f.exists()) {
+            // Fallback: essayer src/ si exécuté depuis la racine dans un IDE
+            f = new File("src/" + nomFichier);
+        }
+
+        Scanner sc = new Scanner(f);
+
+        boolean sectionSommets = false;
+
+        while (sc.hasNextLine()) {
+            String ligne = sc.nextLine().trim();
+            if (ligne.isEmpty() || ligne.startsWith("#") || ligne.startsWith("[")) continue;
+
+            String[] tokens = ligne.split("\\s+");
+            String key = tokens[0].toUpperCase();
+
+            if (key.equals("SOMMETS")) {
+                int n = Integer.parseInt(tokens[1]);
+                for(int i=0; i<n; i++) {
+                    // Ignorer les lignes vides ou commentaires à l'intérieur
+                    while(sc.hasNextLine()) {
+                        String l = sc.nextLine().trim();
+                        if(!l.isEmpty() && !l.startsWith("#")) {
+                            String[] t = l.split("\\s+");
+                            int id = Integer.parseInt(t[0]);
+                            String nom = t[1];
+                            String type = t[2];
+                            int cont = Integer.parseInt(t[3]);
+                            g.ajouterSommet(new Sommet(id, nom, type.equalsIgnoreCase("DEPOT"), cont));
+                            break;
+                        }
+                    }
+                }
+                sectionSommets = true;
+            }
+            else if (key.equals("ARETES")) {
+                if(!sectionSommets) throw new IllegalStateException("Aretes avant Sommets!");
+                int m = Integer.parseInt(tokens[1]);
+                for(int i=0; i<m; i++) {
+                    while(sc.hasNextLine()) {
+                        String l = sc.nextLine().trim();
+                        if(!l.isEmpty() && !l.startsWith("#")) {
+                            String[] t = l.split("\\s+");
+                            int u = Integer.parseInt(t[0]);
+                            int v = Integer.parseInt(t[1]);
+                            double dist = Double.parseDouble(t[2]);
+
+                            // Par défaut Non Orienté (U), sauf si précisé O
+                            boolean estOriente = false;
+                            if (t.length > 3 && (t[3].equalsIgnoreCase("O") || t[3].startsWith("O"))) {
+                                estOriente = true;
+                            }
+
+                            if (estOriente) {
+                                g.ajouterArete(u, v, dist);
+                            } else {
+                                g.ajouterAreteNonOriente(u, v, dist);
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        sc.close();
+        return g;
+    }
+}
+import java.util.*;
+
+public class OptimisationRamassageDechets {
+
+    public static void main(String[] args) {
+        Scanner console = new Scanner(System.in);
+        System.out.println("=== OPTIMISATION RAMASSAGE ===");
+
+        // --- BOUCLE PRINCIPALE (Chargement de graphe) ---
+        while (true) {
+            System.out.println("\n------------------------------------------------");
+            System.out.println("NOUVELLE SESSION DE CHARGEMENT");
+            System.out.print("Nom du fichier (ex: graphe_oriente.txt) ou '0' pour quitter : ");
+            String nomFichier = console.nextLine();
+
+            if (nomFichier.equals("0")) {
+                System.out.println("Fin du programme.");
+                break;
+            }
+
+            Graphe g;
+            try {
+                g = LecteurGraphe.chargerDepuisFichier(nomFichier);
+            } catch (Exception e) {
+                System.out.println("ERREUR : Impossible de charger le fichier (" + e.getMessage() + ")");
+                continue;
+            }
+
+            System.out.println(">> Graphe chargé : " + g.getNombreSommets() + " sommets.");
+
+            // 1. Trouver ou demander le dépôt
+            int idDepot = -1;
+            for(Sommet s : g.getTousLesSommets()) {
+                if(s.depot) {
+                    idDepot = s.id;
+                    break;
+                }
+            }
+            if(idDepot == -1) {
+                System.out.print("Entrez l'ID du dépôt : ");
+                try {
+                    idDepot = Integer.parseInt(console.nextLine());
+                } catch (NumberFormatException e) {
+                    continue;
+                }
+            } else {
+                System.out.println(">> Dépôt : " + g.getSommet(idDepot).nom + " (ID " + idDepot + ")");
+            }
+
+            // 2. Demander la capacité
+            int capaciteSaisie = 0;
+            while (capaciteSaisie <= 0) {
+                System.out.print("Capacité du camion : ");
+                try {
+                    capaciteSaisie = Integer.parseInt(console.nextLine());
+                } catch (NumberFormatException e) {
+                    System.out.println("Entier requis.");
+                }
+            }
+
+            System.out.println("Calcul des distances en cours...");
+            double[][] matriceDistances = g.calculerMatriceDistances();
+
+            // --- BOUCLE SECONDAIRE (Menu Algo) ---
+            boolean changerDeGraphe = false;
+            while (!changerDeGraphe) {
+                System.out.println("\n===== MENU (Fichier: " + nomFichier + " | Capacité: " + capaciteSaisie + ") =====");
+                System.out.println("1. Approche Plus Proche Voisin (PPV)");
+                System.out.println("2. Approche MST (Arbre Couvrant)");
+                System.out.println("9. Charger un autre graphe");
+                System.out.println("0. Quitter");
+                System.out.print("Votre choix : ");
+
+                String choix = console.nextLine();
+
+                if (choix.equals("0")) {
+                    System.out.println("Au revoir !");
+                    System.exit(0);
+                }
+                else if (choix.equals("9")) {
+                    changerDeGraphe = true;
+                    continue;
+                }
+
+                List<Integer> ordreLogique = null;
+                int capacitePourCalcul = capaciteSaisie;
+
+                if (choix.equals("1")) {
+                    ordreLogique = AlgorithmesTSP.approchePlusProcheVoisin(g, idDepot);
+                    capacitePourCalcul = Integer.MAX_VALUE; // Capacité infinie pour voir tout le trajet
+                } else if (choix.equals("2")) {
+                    ordreLogique = AlgorithmesTSP.approcheMST(g, idDepot, matriceDistances);
+                } else {
+                    continue;
+                }
+
+                if (ordreLogique == null || ordreLogique.isEmpty()) {
+                    System.out.println("Aucun point à collecter.");
+                    continue;
+                }
+
+                List<List<Integer>> tournes = AlgorithmesTSP.decouperTournees(ordreLogique, g, idDepot, capacitePourCalcul);
+
+                System.out.println("\n--- RÉSULTAT (" + (choix.equals("1") ? "PPV" : "MST") + ") ---");
+                System.out.println("(Légende : [Nom] = Arrêt collecte, Nom = Simple passage)");
+
+                double distanceTotaleGlobale = 0.0;
+
+                for (int i = 0; i < tournes.size(); i++) {
+                    List<Integer> t = tournes.get(i);
+                    double distTournee = 0;
+                    List<String> affichageChemin = new ArrayList<>();
+
+                    // Ajout du point de départ
+                    affichageChemin.add(formaterSommet(g.getSommet(t.get(0)), true));
+
+                    for (int j = 0; j < t.size() - 1; j++) {
+                        int u = t.get(j);
+                        int v = t.get(j+1);
+
+                        List<Integer> segment = g.getPlusCourtCheminPhysique(u, v);
+                        if (segment.isEmpty()) {
+                            System.out.println("    ERREUR: Pas de chemin de " + u + " à " + v);
+                            distTournee = Double.POSITIVE_INFINITY;
+                            break;
+                        }
+
+                        distTournee += matriceDistances[u][v];
+
+                        // Ajout des étapes intermédiaires
+                        for(int k=1; k<segment.size(); k++) {
+                            int idEtape = segment.get(k);
+                            Sommet sEtape = g.getSommet(idEtape);
+                            boolean estDestinationLogique = (idEtape == v);
+                            affichageChemin.add(formaterSommet(sEtape, estDestinationLogique));
+                        }
+                    }
+
+                    System.out.println("\n  TOURNEE " + (i+1));
+                    System.out.println("  [Logique] : " + t);
+                    System.out.println("  [Réel]    : " + String.join(" -> ", affichageChemin));
+                    System.out.println("  [Dist.]   : " + String.format("%.2f", distTournee));
+
+                    if (distTournee != Double.POSITIVE_INFINITY)
+                        distanceTotaleGlobale += distTournee;
+                }
+
+                if (choix.equals("2") && tournes.size() > 1) {
+                    System.out.println("\nDISTANCE TOTALE CUMULÉE : " + String.format("%.2f", distanceTotaleGlobale));
+                }
+            }
+        }
+    }
+
+    private static String formaterSommet(Sommet s, boolean estArret) {
+        if (estArret) {
+            if (s.depot) return "[DEPOT " + s.nom + "]";
+            return "[" + s.nom + "]";
+        } else {
+            return s.nom;
+        }
+    }
+}
+public class Sommet {
+    int id;
+    String nom;
+    boolean depot;
+    int contenance;
+
+    public Sommet(int id, String nom, boolean depot, int contenance) {
+        this.id = id;
+        this.nom = nom;
+        this.depot = depot;
+        this.contenance = contenance;
+    }
+
+    @Override
+    public String toString() {
+        return nom + " (Déchets: " + contenance + ")";
+    }
+}
