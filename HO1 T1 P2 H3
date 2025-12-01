@@ -1,0 +1,208 @@
+import java.io.*;
+import java.util.*;
+
+// Classe pour représenter une rue du graphe
+class Route {
+    int u, v, weight;
+    // Identifiant unique pour distinguer deux rues identiques si besoin (multigraphe)
+    String id;
+
+    public Route(int u, int v, int weight) {
+        this.u = u;
+        this.v = v;
+        this.weight = weight;
+        this.id = u + "-" + v;
+    }
+}
+
+public class CollecteSelectionFinale {
+
+    // --- DONNÉES ---
+    // Tout le graphe (pour les déplacements GPS)
+    List<Route> allEdges = new ArrayList<>();
+    // Liste des rues à collecter (choisies par l'utilisateur)
+    List<Route> todoList = new ArrayList<>();
+    // La séquence finale des sommets (0 -> 1 -> 2 ...)
+    List<Integer> finalPathSequence = new ArrayList<>();
+
+    // Matrices pour le calcul d'itinéraire (Floyd-Warshall)
+    int[][] distMatrix;
+    int[][] nextNode;
+    int numNodes = 0;
+    final int INF = 999999;
+
+    public static void main(String[] args) {
+        new CollecteSelectionFinale().run();
+    }
+
+    public void run() {
+        System.out.println("--- COLLECTE SÉLECTIVE AVEC ITINÉRAIRE FINAL ---");
+
+        // 1. Chargement
+        String cheminFichier = "/Users/corentinlepeltier/IdeaProjects/eval4/src/graphe.txt";
+        if (!loadGraph(cheminFichier)) return;
+
+        // 2. Calcul des distances (GPS) pour savoir comment aller d'un point A à B
+        computeFloydWarshall();
+
+        // 3. Sélection par l'utilisateur
+        Scanner scanner = new Scanner(System.in);
+        System.out.println("\n>>> SÉLECTION DES POUBELLES <<<");
+        System.out.println("Pour chaque rue, tapez 'o' (oui) ou 'n' (non).");
+
+        for (Route r : allEdges) {
+            // On évite de demander deux fois la même rue (u-v et v-u)
+            if (r.u < r.v) {
+                System.out.print(" - Rue " + r.u + " <-> " + r.v + " (" + r.weight + "m) : ");
+                String rep = scanner.next();
+                if (rep.equalsIgnoreCase("o")) {
+                    todoList.add(new Route(r.u, r.v, r.weight));
+                }
+            }
+        }
+
+        if (todoList.isEmpty()) {
+            System.out.println("Aucune rue sélectionnée. Pas de trajet.");
+            return;
+        }
+
+        // 4. Construction de l'itinéraire (Algorithme Glouton)
+        System.out.println("\n>>> CALCUL DE L'ITINÉRAIRE OPTIMISÉ <<<");
+
+        int currentPos = 0; // Départ du dépôt
+        int totalDist = 0;
+
+        // On ajoute le point de départ à la liste finale
+        finalPathSequence.add(currentPos);
+
+        while (!todoList.isEmpty()) {
+            // A. Trouver la poubelle la plus proche de ma position actuelle
+            Route bestRoute = null;
+            int minDist = INF;
+            int targetNode = -1; // Par quel côté de la rue on va entrer
+
+            for (Route r : todoList) {
+                // Distance vers u
+                int dToU = distMatrix[currentPos][r.u];
+                // Distance vers v
+                int dToV = distMatrix[currentPos][r.v];
+
+                // On cherche le point d'accès le plus proche
+                if (dToU < minDist) {
+                    minDist = dToU;
+                    bestRoute = r;
+                    targetNode = r.u; // On entre par U
+                }
+                if (dToV < minDist) {
+                    minDist = dToV;
+                    bestRoute = r;
+                    targetNode = r.v; // On entre par V
+                }
+            }
+
+            // B. Déplacement vers le début de la rue (si on n'y est pas déjà)
+            if (minDist > 0) {
+                System.out.println("   [Trajet] Déplacement vers " + targetNode + " (" + minDist + "m)");
+                addPathToSequence(currentPos, targetNode);
+                totalDist += minDist;
+            }
+
+            // C. Collecte de la rue
+            int endNode = (targetNode == bestRoute.u) ? bestRoute.v : bestRoute.u;
+            System.out.println("   [Collecte] Ramassage " + targetNode + " -> " + endNode + " (" + bestRoute.weight + "m)");
+
+            // Ajout manuel du noeud d'arrivée de la collecte (le départ est déjà le dernier point de la séquence)
+            finalPathSequence.add(endNode);
+
+            totalDist += bestRoute.weight;
+            currentPos = endNode;
+
+            // D. Tâche terminée
+            todoList.remove(bestRoute);
+        }
+
+        // 5. Retour au dépôt
+        if (currentPos != 0) {
+            int dRetour = distMatrix[currentPos][0];
+            System.out.println("   [Retour] Rentrée au dépôt (" + dRetour + "m)");
+            addPathToSequence(currentPos, 0);
+            totalDist += dRetour;
+        }
+
+        // 6. Affichage Final
+        System.out.println("\n-------------------------------------------");
+        System.out.println("DISTANCE TOTALE : " + totalDist + " mètres");
+        System.out.println("COMBINAISON FINALE DES SOMMETS :");
+
+        System.out.print("START ");
+        for (Integer node : finalPathSequence) {
+            System.out.print("-> " + node + " ");
+        }
+        System.out.println("-> END");
+        System.out.println("-------------------------------------------");
+    }
+
+    // --- MÉTHODES UTILITAIRES ---
+
+    // Ajoute tous les noeuds intermédiaires d'un chemin court à la séquence finale
+    // (Sans ré-ajouter le point de départ qui est déjà là)
+    void addPathToSequence(int start, int end) {
+        if (start == end) return;
+        int curr = start;
+        while (curr != end) {
+            curr = nextNode[curr][end];
+            finalPathSequence.add(curr);
+        }
+    }
+
+    void computeFloydWarshall() {
+        distMatrix = new int[numNodes][numNodes];
+        nextNode = new int[numNodes][numNodes];
+
+        for (int i = 0; i < numNodes; i++) {
+            Arrays.fill(distMatrix[i], INF);
+            distMatrix[i][i] = 0;
+        }
+
+        for (Route r : allEdges) {
+            distMatrix[r.u][r.v] = r.weight;
+            distMatrix[r.v][r.u] = r.weight;
+            nextNode[r.u][r.v] = r.v;
+            nextNode[r.v][r.u] = r.u;
+        }
+
+        for (int k = 0; k < numNodes; k++) {
+            for (int i = 0; i < numNodes; i++) {
+                for (int j = 0; j < numNodes; j++) {
+                    if (distMatrix[i][k] + distMatrix[k][j] < distMatrix[i][j]) {
+                        distMatrix[i][j] = distMatrix[i][k] + distMatrix[k][j];
+                        nextNode[i][j] = nextNode[i][k];
+                    }
+                }
+            }
+        }
+    }
+
+    boolean loadGraph(String filename) {
+        try (BufferedReader br = new BufferedReader(new FileReader(filename))) {
+            String line;
+            int maxId = 0;
+            while ((line = br.readLine()) != null) {
+                String[] p = line.trim().split("\\s+");
+                if (p.length >= 3) {
+                    int u = Integer.parseInt(p[0]);
+                    int v = Integer.parseInt(p[1]);
+                    int w = Integer.parseInt(p[2]);
+                    // On charge tout comme non-orienté pour le calcul de distance GPS
+                    allEdges.add(new Route(u, v, w));
+                    maxId = Math.max(maxId, Math.max(u, v));
+                }
+            }
+            numNodes = maxId + 1;
+            return true;
+        } catch (Exception e) {
+            System.out.println("Erreur lecture fichier : " + e.getMessage());
+            return false;
+        }
+    }
+}
