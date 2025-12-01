@@ -1,0 +1,246 @@
+import java.io.*;
+import java.util.*;
+
+class Route {
+    int u, v, weight;
+    int type; // 1=Unique, 2=Double, 3=Mixte (Rouge)
+    String id; // Identifiant unique pour lier les deux sens d'une rue rouge
+
+    public Route(int u, int v, int weight, int type) {
+        this.u = u;
+        this.v = v;
+        this.weight = weight;
+        this.type = type;
+        // ID unique pour la rue, peu importe le sens (ex: "3-5" est le même id que "5-3")
+        this.id = (u < v) ? u + "-" + v : v + "-" + u;
+    }
+}
+
+public class CollecteHO3Finale {
+
+    List<Route> allEdges = new ArrayList<>();
+    List<Route> todoList = new ArrayList<>(); // Liste des tâches
+    List<Integer> finalPathSequence = new ArrayList<>();
+
+    int[][] distMatrix; // GPS Standard
+    int[][] nextNode;
+    int numNodes = 0;
+    final int INF = 999999;
+
+    public static void main(String[] args) {
+        new CollecteHO3Finale().run();
+    }
+
+    public void run() {
+        // 1. Chargement
+        String cheminFichier = "/Users/corentinlepeltier/IdeaProjects/eval4/src/graphe.txt";
+        if (!loadGraph(cheminFichier)) return;
+
+        // 2. Calcul GPS
+        computeFloydWarshall();
+
+        // 3. Sélection
+        Scanner scanner = new Scanner(System.in);
+        System.out.println("--- COLLECTE HO3 FINALE (Optimisation Rouge + Transit 0 autorisé) ---");
+
+        Set<String> asked = new HashSet<>();
+        for (Route r : allEdges) {
+            // On demande une seule fois pour les rues rouges (car le sens est au choix)
+            if (r.type == 3) {
+                if (asked.contains(r.id)) continue;
+                asked.add(r.id);
+                System.out.print(" - Rue ROUGE " + r.u + " <-> " + r.v + " (" + r.weight + "m) : ");
+            } else {
+                System.out.print(" - Voie " + r.u + " -> " + r.v + " (" + r.weight + "m) : ");
+            }
+
+            if (scanner.next().equalsIgnoreCase("o")) {
+                todoList.add(r);
+            }
+        }
+
+        if (todoList.isEmpty()) return;
+
+        // 4. Exécution
+        System.out.println("\n--- DÉMARRAGE TOURNÉE ---");
+        int currentPos = 0;
+        int totalDist = 0;
+        finalPathSequence.add(0);
+
+        while (!todoList.isEmpty()) {
+            Route bestRoute = null;
+            int bestDist = INF;
+            int bestStart = -1;
+            int bestEnd = -1;
+
+            // A. Est-ce qu'on est obligé de rentrer maintenant ?
+            boolean forceReturn = true;
+            for (Route r : todoList) {
+                if (r.type == 3) {
+                    // Une rue rouge peut finir ailleurs qu'à 0 (si u!=0 et v!=0)
+                    if (r.u != 0 && r.v != 0) forceReturn = false;
+                } else {
+                    if (r.v != 0) forceReturn = false;
+                }
+                if (!forceReturn) break;
+            }
+
+            // B. Choix de la meilleure prochaine étape
+            for (Route r : todoList) {
+                // Pour une rue rouge, on a 2 options de sens. Pour les autres, 1 seule.
+                List<Integer> starts = new ArrayList<>();
+                List<Integer> ends = new ArrayList<>();
+
+                if (r.type == 3) {
+                    starts.add(r.u); ends.add(r.v); // Option 1
+                    starts.add(r.v); ends.add(r.u); // Option 2
+                } else {
+                    starts.add(r.u); ends.add(r.v);
+                }
+
+                for (int i = 0; i < starts.size(); i++) {
+                    int s = starts.get(i);
+                    int e = ends.get(i);
+
+                    // Règle : On ne choisit pas une option qui finit au dépôt tant qu'il reste du travail
+                    if (!forceReturn && e == 0) continue;
+
+                    int d = distMatrix[currentPos][s];
+                    if (d >= INF) continue; // Inaccessible
+
+                    // Critère : Le plus proche
+                    if (d < bestDist) {
+                        bestDist = d;
+                        bestRoute = r;
+                        bestStart = s;
+                        bestEnd = e;
+                    }
+                }
+            }
+
+            if (bestRoute == null) {
+                System.out.println("ERREUR : Impossible de continuer (Bloqué ou Graphe Puits).");
+                // Mode Panique : On prend le premier dispo même si ça finit à 0
+                if (!todoList.isEmpty()) {
+                    Route r = todoList.get(0);
+                    bestRoute = r;
+                    bestStart = r.u;
+                    bestEnd = r.v;
+                    bestDist = distMatrix[currentPos][bestStart];
+                    System.out.println("   -> Activation mode secours.");
+                } else {
+                    break;
+                }
+            }
+
+            // Déplacement
+            if (bestDist > 0) {
+                System.out.println("   [Trajet] " + currentPos + " -> " + bestStart + " (" + bestDist + "m)");
+                addPathToSequence(currentPos, bestStart);
+                totalDist += bestDist;
+            }
+
+            // Collecte
+            String info = (bestRoute.type == 3) ? " [Sens Optimisé]" : "";
+            System.out.println("   [Collecte] " + bestStart + " -> " + bestEnd + " (" + bestRoute.weight + "m)" + info);
+
+            finalPathSequence.add(bestEnd);
+            totalDist += bestRoute.weight;
+            currentPos = bestEnd;
+
+            // Suppression (Si Type 3, on supprime toutes les occurrences de cet ID dans la liste)
+            removeTask(bestRoute.id);
+        }
+
+        // Retour Final
+        if (currentPos != 0) {
+            int dRetour = distMatrix[currentPos][0];
+            System.out.println("   [Fin] Retour dépôt (" + dRetour + "m)");
+            addPathToSequence(currentPos, 0);
+            totalDist += dRetour;
+        }
+
+        // Affichage
+        System.out.println("\n===========================================");
+        System.out.println("DISTANCE TOTALE : " + totalDist + " mètres");
+        System.out.print("CHEMIN FINAL : ");
+        for (int i = 0; i < finalPathSequence.size(); i++) {
+            System.out.print(finalPathSequence.get(i));
+            if (i < finalPathSequence.size() - 1) System.out.print(" -> ");
+        }
+        System.out.println("\n===========================================");
+    }
+
+    // --- OUTILS ---
+
+    void removeTask(String id) {
+        todoList.removeIf(r -> r.id.equals(id));
+    }
+
+    void computeFloydWarshall() {
+        distMatrix = new int[numNodes][numNodes];
+        nextNode = new int[numNodes][numNodes];
+
+        for (int i = 0; i < numNodes; i++) {
+            Arrays.fill(distMatrix[i], INF);
+            distMatrix[i][i] = 0;
+        }
+
+        for (Route r : allEdges) {
+            // On charge les arcs dans la matrice GPS
+            // Type 3 et 2 sont bidirectionnels pour le GPS
+            if (r.weight < distMatrix[r.u][r.v]) {
+                distMatrix[r.u][r.v] = r.weight;
+                nextNode[r.u][r.v] = r.v;
+            }
+        }
+
+        for (int k = 0; k < numNodes; k++) {
+            for (int i = 0; i < numNodes; i++) {
+                for (int j = 0; j < numNodes; j++) {
+                    if (distMatrix[i][k] + distMatrix[k][j] < distMatrix[i][j]) {
+                        distMatrix[i][j] = distMatrix[i][k] + distMatrix[k][j];
+                        nextNode[i][j] = nextNode[i][k];
+                    }
+                }
+            }
+        }
+    }
+
+    void addPathToSequence(int start, int end) {
+        if (start == end) return;
+        int curr = start;
+        while (curr != end) {
+            curr = nextNode[curr][end];
+            finalPathSequence.add(curr);
+        }
+    }
+
+    boolean loadGraph(String filename) {
+        try (BufferedReader br = new BufferedReader(new FileReader(filename))) {
+            String line;
+            int maxId = 0;
+            while ((line = br.readLine()) != null) {
+                String[] p = line.trim().split("\\s+");
+                if (p.length >= 4) {
+                    int u = Integer.parseInt(p[0]);
+                    int v = Integer.parseInt(p[1]);
+                    int w = Integer.parseInt(p[2]);
+                    int type = Integer.parseInt(p[3]);
+
+                    // Ajout dans le graphe de navigation
+                    allEdges.add(new Route(u, v, w, type));
+
+                    // Si Type 2 ou 3, on peut naviguer dans l'autre sens aussi
+                    if (type == 2 || type == 3) {
+                        allEdges.add(new Route(v, u, w, type));
+                    }
+
+                    maxId = Math.max(maxId, Math.max(u, v));
+                }
+            }
+            numNodes = maxId + 1;
+            return true;
+        } catch (Exception e) { return false; }
+    }
+}
