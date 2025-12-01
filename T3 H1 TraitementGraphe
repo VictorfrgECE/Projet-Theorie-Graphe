@@ -1,0 +1,162 @@
+import java.io.BufferedReader;
+import java.io.FileReader;
+import java.io.IOException;
+import java.util.*;
+
+public class TraitementGraphe {
+
+    /**
+     * Lit le fichier texte et crée le graphe.
+     */
+    public static List<Secteur> chargerGraphe(String cheminFichier) {
+        Map<String, Secteur> mapSecteurs = new HashMap<>();
+        int idGenerateur = 1;
+
+        try (BufferedReader br = new BufferedReader(new FileReader(cheminFichier))) {
+            String ligne;
+            while ((ligne = br.readLine()) != null) {
+                ligne = ligne.trim();
+                if (ligne.isEmpty() || ligne.startsWith("#")) continue;
+
+                String[] noms = ligne.split(";");
+                if (noms.length < 2) continue;
+
+                String nom1 = noms[0].trim();
+                String nom2 = noms[1].trim();
+
+                mapSecteurs.putIfAbsent(nom1, new Secteur(idGenerateur++, nom1));
+                mapSecteurs.putIfAbsent(nom2, new Secteur(idGenerateur++, nom2));
+
+                Secteur s1 = mapSecteurs.get(nom1);
+                Secteur s2 = mapSecteurs.get(nom2);
+                s1.ajouterVoisin(s2);
+            }
+        } catch (IOException e) {
+            System.err.println("Erreur lecture fichier : " + e.getMessage());
+        }
+
+        return new ArrayList<>(mapSecteurs.values());
+    }
+
+    /**
+     * Algorithme de Welsh-Powell (Thème 3 - H1).
+     */
+    public static void appliquerWelshPowell(List<Secteur> secteurs) {
+        // 1. Tri décroissant par degré (C'est le cœur de l'algo)
+        secteurs.sort(Comparator.comparingInt(Secteur::getDegre).reversed());
+
+        int jourActuel = 0;
+        int nbSecteursTraites = 0;
+
+        while (nbSecteursTraites < secteurs.size()) {
+            List<Secteur> secteursDuJour = new ArrayList<>();
+
+            for (Secteur candidat : secteurs) {
+                if (candidat.getJourPassage() == -1) {
+                    boolean compatible = true;
+                    for (Secteur sDejaPris : secteursDuJour) {
+                        if (candidat.estVoisin(sDejaPris)) {
+                            compatible = false;
+                            break;
+                        }
+                    }
+
+                    if (compatible) {
+                        candidat.setJourPassage(jourActuel);
+                        secteursDuJour.add(candidat);
+                        nbSecteursTraites++;
+                    }
+                }
+            }
+            jourActuel++;
+        }
+    }
+
+    /**
+     * AFFICHE 1 : Le tableau technique de l'algorithme (Trié par degré)
+     */
+    public static void afficherTableauTechnique(List<Secteur> ville) {
+        System.out.println("\n-----------------------------------------------------");
+        System.out.println("   TABLEAU D'ALGORITHME (WELSH-POWELL)   ");
+        System.out.println("   (Trié par ordre décroissant de degré) ");
+        System.out.println("-----------------------------------------------------");
+        System.out.printf("| %-15s | %-5s | %-18s |\n", "Secteur", "Degré", "Jour Attribué");
+        System.out.println("|-----------------|-------|--------------------|");
+
+        // On s'assure que l'affichage suit la logique de l'algo (par degré)
+        List<Secteur> copieTriee = new ArrayList<>(ville);
+        copieTriee.sort(Comparator.comparingInt(Secteur::getDegre).reversed());
+
+        String[] jours = {"Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche"};
+
+        for (Secteur s : copieTriee) {
+            String nomJour = (s.getJourPassage() < jours.length)
+                    ? jours[s.getJourPassage()]
+                    : "Jour " + (s.getJourPassage() + 1);
+
+            System.out.printf("| %-15s | %-5d | %-18s |\n", s.getNom(), s.getDegre(), nomJour);
+        }
+        System.out.println("-----------------------------------------------------");
+    }
+
+    /**
+     * AFFICHE 2 : Le planning final pour le client (Propre, sans voisins)
+     */
+
+    public static void afficherPlanningClient(List<Secteur> ville) {
+        // --- VÉRIFICATION DE LA LIMITE DE 7 JOURS ---
+        int maxJourIndice = 0;
+        for (Secteur s : ville) {
+            if (s.getJourPassage() > maxJourIndice) {
+                maxJourIndice = s.getJourPassage();
+            }
+        }
+        // Si on dépasse Dimanche (indice 6), c'est un échec
+        if (maxJourIndice >= 7) {
+            System.out.println();
+            System.out.println();
+            System.out.println();
+            System.out.println();
+            System.out.println();
+            System.err.println("                 ALERTE : ÉCHEC DU PLANNING              ");
+            System.out.println("");
+            System.err.println(" Le graphe actuel est trop complexe pour un cycle hebdomadaire.");
+            System.err.println(" Il faudrait " + (maxJourIndice + 1) + " jours pour respecter les contraintes de voisinage.");
+            System.err.println(" Or, une semaine ne compte que 7 jours.");
+            System.err.println();
+            System.err.println(" CONSEILS :");
+            System.err.println(" 1. Veuillez changer de graphe (simplifier les connexions).");
+            System.err.println(" 2. Ou acceptez que certains voisins soient collectés le même jour.");
+
+            return; // ON ARRÊTE L'AFFICHAGE ICI
+        }
+        System.out.println();
+        System.out.println();
+        System.out.println();
+        System.out.println();
+        System.out.println();
+        System.out.println("           PLANNING FINAL DE COLLECTE            ");
+        System.out.println("        (Trié par ordre chronologique)           ");
+        System.out.println("|---------------------------------------------|");
+        System.out.printf("| %-25s | %-15s |\n", "Jour de Passage", "Secteur");
+        System.out.println("|---------------------------|-----------------|");
+
+
+        // 1. On trie d'abord par numéro de jour (0, 1, 2...)
+        // 2. Ensuite par nom (pour que ce soit propre à l'intérieur d'une journée)
+        ville.sort(Comparator.comparingInt(Secteur::getJourPassage)
+                .thenComparing(Secteur::getNom));
+
+        String[] jours = {"Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche"};
+
+        for (Secteur s : ville) {
+            String nomJour = (s.getJourPassage() < jours.length)
+                    ? jours[s.getJourPassage()]
+                    : "Jour " + (s.getJourPassage() + 1);
+
+            // J'ai inversé les colonnes pour mettre le Jour en premier, c'est plus logique
+            System.out.printf("| %-25s | %-15s |\n", nomJour, s.getNom());
+        }
+        System.out.println("|---------------------------|-----------------|");
+    }
+}
