@@ -1,0 +1,184 @@
+import java.io.*;
+import java.util.*;
+
+// Représente une rue (Arete)
+class Route {
+    int u, v, weight;
+    boolean collected; // Pour savoir si on l'a déjà vidé
+
+    public Route(int u, int v, int weight) {
+        this.u = u;
+        this.v = v;
+        this.weight = weight;
+        this.collected = false;
+    }
+}
+
+public class CollecteSelectifIdeale {
+
+    List<Route> allEdges = new ArrayList<>(); // Tout le réseau routier
+    List<Route> todoList = new ArrayList<>(); // Seulement les rues avec poubelles
+
+    int[][] distMatrix; // Matrice des distances (Floyd-Warshall)
+    int[][] nextNode;   // Pour reconstruire les chemins GPS
+    int numNodes = 0;
+    final int INF = 999999;
+
+    public static void main(String[] args) {
+        new CollecteSelectifIdeale().run();
+    }
+
+    public void run() {
+        // 1. Chargement
+        String cheminFichier = "/Users/corentinlepeltier/IdeaProjects/eval4/src/graphe.txt"; // Mets ton chemin complet si besoin
+        if (!loadGraph(cheminFichier)) return;
+
+        // 2. Calcul des distances (GPS)
+        computeFloydWarshall();
+
+        // 3. Interaction Utilisateur
+        Scanner scanner = new Scanner(System.in);
+        System.out.println("--- CONFIGURATION DE LA COLLECTE ---");
+        System.out.println("Pour chaque rue, tapez 'o' (oui) ou 'n' (non) s'il y a des poubelles.");
+
+        for (Route r : allEdges) {
+            System.out.print("Rue " + r.u + " <-> " + r.v + " (" + r.weight + "m) : ");
+            String rep = scanner.next();
+            if (rep.equalsIgnoreCase("o")) {
+                // On ajoute une COPIE de la route dans la liste des tâches
+                todoList.add(new Route(r.u, r.v, r.weight));
+            }
+        }
+
+        if (todoList.isEmpty()) {
+            System.out.println("Rien à collecter. Le camion reste au dépôt.");
+            return;
+        }
+
+        System.out.println("\n--- DÉMARRAGE DE LA TOURNÉE ---");
+
+        // 4. Résolution (Algorithme du plus proche voisin sur les arcs)
+        int currentPos = 0; // Dépôt
+        int totalDist = 0;
+
+        while (!todoList.isEmpty()) {
+            // A. Trouver la poubelle la plus proche de ma position actuelle
+            Route bestRoute = null;
+            int minDist = INF;
+            int targetNode = -1; // Le bout de la rue par lequel on va attaquer
+
+            for (Route r : todoList) {
+                // Distance pour aller au point u de la route
+                int dToU = distMatrix[currentPos][r.u];
+                // Distance pour aller au point v de la route
+                int dToV = distMatrix[currentPos][r.v];
+
+                // On choisit l'accès le plus court
+                if (dToU < minDist) {
+                    minDist = dToU;
+                    bestRoute = r;
+                    targetNode = r.u; // On entrera par u, on sortira par v
+                }
+                if (dToV < minDist) {
+                    minDist = dToV;
+                    bestRoute = r;
+                    targetNode = r.v; // On entrera par v, on sortira par u
+                }
+            }
+
+            // B. Se déplacer jusqu'au début de la rue (Trajet à vide)
+            if (minDist > 0) {
+                System.out.print("  [DÉPLACEMENT] " + currentPos + " -> " + targetNode + " : ");
+                printPath(currentPos, targetNode);
+                System.out.println();
+                totalDist += minDist;
+            }
+
+            // C. Collecter la rue
+            int endNode = (targetNode == bestRoute.u) ? bestRoute.v : bestRoute.u;
+            System.out.println("  [COLLECTE]    Ramassage rue " + targetNode + " -> " + endNode + " (" + bestRoute.weight + "m)");
+
+            totalDist += bestRoute.weight;
+            currentPos = endNode; // On est maintenant à l'autre bout de la rue
+
+            // D. Retirer cette tâche de la liste
+            todoList.remove(bestRoute);
+        }
+
+        // 5. Retour au dépôt
+        if (currentPos != 0) {
+            int dRetour = distMatrix[currentPos][0];
+            System.out.print("  [RETOUR DÉPÔT] " + currentPos + " -> 0 : ");
+            printPath(currentPos, 0);
+            System.out.println();
+            totalDist += dRetour;
+        } else {
+            System.out.println("  [INFO] Déjà au dépôt.");
+        }
+
+        System.out.println("---------------------------------");
+        System.out.println("DISTANCE TOTALE : " + totalDist + " mètres.");
+    }
+
+    // --- ALGORITHMES ---
+
+    void computeFloydWarshall() {
+        // Initialisation
+        distMatrix = new int[numNodes][numNodes];
+        nextNode = new int[numNodes][numNodes];
+
+        for (int i = 0; i < numNodes; i++) {
+            Arrays.fill(distMatrix[i], INF);
+            distMatrix[i][i] = 0;
+        }
+
+        for (Route r : allEdges) {
+            distMatrix[r.u][r.v] = r.weight;
+            distMatrix[r.v][r.u] = r.weight; // Graphe non orienté
+            nextNode[r.u][r.v] = r.v;
+            nextNode[r.v][r.u] = r.u;
+        }
+
+        // Calcul
+        for (int k = 0; k < numNodes; k++) {
+            for (int i = 0; i < numNodes; i++) {
+                for (int j = 0; j < numNodes; j++) {
+                    if (distMatrix[i][k] + distMatrix[k][j] < distMatrix[i][j]) {
+                        distMatrix[i][j] = distMatrix[i][k] + distMatrix[k][j];
+                        nextNode[i][j] = nextNode[i][k];
+                    }
+                }
+            }
+        }
+    }
+
+    void printPath(int start, int end) {
+        if (start == end) return;
+        int curr = start;
+        System.out.print(curr);
+        while (curr != end) {
+            curr = nextNode[curr][end];
+            System.out.print(" -> " + curr);
+        }
+        System.out.print(" (" + distMatrix[start][end] + "m)");
+    }
+
+    boolean loadGraph(String filename) {
+        try (BufferedReader br = new BufferedReader(new FileReader(filename))) {
+            String line;
+            int maxId = 0;
+            while ((line = br.readLine()) != null) {
+                String[] p = line.trim().split("\\s+");
+                if (p.length >= 3) {
+                    int u = Integer.parseInt(p[0]);
+                    int v = Integer.parseInt(p[1]);
+                    int w = Integer.parseInt(p[2]);
+                    allEdges.add(new Route(u, v, w));
+                    maxId = Math.max(maxId, Math.max(u, v));
+                }
+            }
+            numNodes = maxId + 1;
+            return true;
+        } catch (Exception e) { return false; }
+    }
+}
