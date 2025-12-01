@@ -1,0 +1,41 @@
+import java.util.ArrayList;
+import java.util.List;
+
+public class Secteur {
+    private int id;
+    private String nom;
+    private int poids; // Quantité de déchets
+    private List<Secteur> voisins;
+    private int jourPassage; // -1 si pas encore planifié
+
+    public Secteur(int id, String nom, int poids) {
+        this.id = id;
+        this.nom = nom;
+        this.poids = poids;
+        this.voisins = new ArrayList<>();
+        this.jourPassage = -1;
+    }
+
+    public void ajouterVoisin(Secteur s) {
+        if (!this.voisins.contains(s)) {
+            this.voisins.add(s);
+            // On s'assure que le lien est réciproque
+            if (!s.getVoisins().contains(this)) {
+                s.getVoisins().add(this);
+            }
+        }
+    }
+
+    // Getters et Setters
+    public String getNom() { return nom; }
+    public int getPoids() { return poids; }
+    public List<Secteur> getVoisins() { return voisins; }
+    public int getJourPassage() { return jourPassage; }
+    public void setJourPassage(int jour) { this.jourPassage = jour; }
+    public int getDegre() { return voisins.size(); }
+
+    @Override
+    public String toString() {
+        return nom + " (" + poids + "kg)";
+    }
+}
